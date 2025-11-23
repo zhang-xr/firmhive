@@ -12,25 +12,6 @@
 - 🔧 **可自定义分析蓝图**：分析策略不是硬编码的。您可以在 `firmhive/blueprint.py` 中定义自己的分层工作流、智能体类型、工具和提示词。
 - 🤖 **专业化智能体**：`firmhive/assistants.py` 中设计了一套专门用于特定任务的智能体，如目录遍历、文件分析和深度二进制函数追踪。
 
-## 项目结构
-
-```
-firmhive/
-├── agent/                  # 核心智能体框架（"蜂巢"）
-│   ├── base.py            # 核心 LLM/智能体运行时、工具编排、异步任务
-│   ├── core/              # 🏠 递归委托引擎 (RDE) 实现
-│   └── tools/             # 通用工具执行框架
-│
-├── firmhive/              # 固件分析的领域特定实现
-│   ├── blueprint.py       # 🧬 分析层次结构、智能体配置和系统提示词
-│   ├── knowagent.py       # 🧠 主动知识中心 (PKH) 智能体
-│   ├── assistants.py      # 🐝 专业化分析智能体（目录、文件、函数）
-│   └── tools.py           # 🛠️ 固件分析工具（文件系统、radare2 封装）
-│
-├── eval/             # 基线智能体实现（SRA、MAS）
-└── scripts/               # 执行分析和基线的脚本
-```
-
 ## 快速开始
 
 ### 前置要求
@@ -73,11 +54,6 @@ python -u firmhive/blueprint.py \
   --output ./output
 ```
 
-数据集根目录（供脚本使用）：建议通过环境变量设置，避免硬编码
-
-```bash
-export KARONTE_DATASET_DIR=/path/to/karonte_dataset
-```
 
 ## 理解输出结果
 
@@ -95,17 +71,6 @@ output/
 └── FirmwareMasterAgent_logs/  # 完整详细的消息历史（用于调试）
 ```
 
-**关键要点**：始终首先阅读 `verification_report.md`。该文件包含系统过滤潜在误报后的最终高置信度发现。
-
-### 运行期间的预期指标
-
-| 指标 | 典型范围 | 说明 |
-| :--- | :--- | :--- |
-| **分析时间** | 30 分钟 - 2+ 小时 | 很大程度上取决于固件大小和复杂度 |
-| **Token 使用量** | 500 万 - 5000 万 tokens | 根据文件数量和分析深度而变化 |
-| **成本估算** | $1 - $10 USD | 使用 DeepSeek API。监控 `token_usage.jsonl` |
-| **初始发现**| 10 - 100+ 候选| 探索阶段设计为广泛覆盖，会包含误报 |
-| **验证后发现**| 约初始候选的 20-50% | 验证阶段将候选过滤为高精度漏洞集 |
 
 ## 架构深入解析
 
@@ -164,43 +129,6 @@ output/
 - **查询**：跨分析会话搜索相关发现
 - **探索**：发现不同发现之间的联系
 
-## 复现评估结果
-
-### 运行基线
-
-```bash
-# 在脚本中编辑固件路径
-vim scripts/run_hierarchical.sh  # 设置 FIRMWARE_BASE_DIR
-
-# 运行 FirmHive（完整系统）
-bash scripts/run_hierarchical.sh
-
-# 运行基线
-bash scripts/run_baseline_agent.sh        # SRA（单一 ReAct 智能体）
-bash scripts/run_baseline_agent_kb.sh     # SRA + 知识库
-bash scripts/run_baseline_pipeline.sh     # MAS（静态多智能体系统）
-bash scripts/run_baseline_pipeline_kb.sh  # MAS + 知识库
-```
-
-### 结果位置
-
-所有评估输出存储在 `result/` 目录中，按方法组织。论文打包仅包含 `exp/`，本地临时输出 `output/` 与 `result/` 均不提交。
-
-```
-results/
-├── Hierarchical/              # ✅ FirmHive（我们的系统）
-│   └── <任务>/<固件>/
-│       ├── knowledge_base.jsonl
-│       ├── verification_report.md    # ⭐ 最终验证发现在此
-│       └── verification_results.jsonl
-├── BaselineAgent/             # 单智能体基线
-├── BaselineAgentKB/           # 单智能体 + 知识库
-├── BaselinePipeline/          # 静态多智能体流水线（MAS）
-└── BaselinePipelineKB/        # 静态多智能体流水线 + 知识库（MAS+KB）
-```
-
-**分析提示**：比较结果时，始终使用 FirmHive 的 `verification_report.md` 来查看最终验证的漏洞，而不是初始候选的原始 `knowledge_base.jsonl`。
-
 ## 自定义和配置
 
 ### LLM API 配置
@@ -244,63 +172,6 @@ messages_filters = [
 
 默认配置针对漏洞搜寻进行了调优。如果您的目标是代码审查、合规性检查或特性提取，您应该调整这些提示词和层定义。
 
-## 输出示例片段
-
-### 初始分析候选（来自 `knowledge_base.jsonl`）
-
-```json
-{
-  "name": "Hardcoded_Credentials_Admin",
-  "location": "etc/config/default_config.xml line 42",
-  "description": "在默认配置中发现硬编码的管理员凭据...",
-  "code_snippet": "<admin><username>admin</username><password>admin123</password></admin>",
-  "risk_score": 9.0,
-  "confidence": 9.5,
-  "file_path": "etc/config/default_config.xml"
-}
-```
-
-### 验证结果（来自 `verification_results.jsonl`）
-
-```json
-{
-  "name": "Hardcoded_Credentials_Admin",
-  "is_real_vulnerability": true,
-  "risk_level": "Critical",
-  "detailed_reason": "已确认：默认凭据 'admin/admin123' 硬编码在默认配置文件中，用于身份验证且没有任何强制更改机制。",
-  "verification_duration": 45.2,
-  "token_usage": 12450
-}
-```
-
-**关键区别**：验证结果提供了明确的确认（`is_real_vulnerability: true/false`），应该是您的真相来源。
-
-## 故障排除
-
-### 常见问题
-
-**找不到 radare2**
-
-```bash
-# 验证 radare2 安装
-r2 -v
-
-# 检查 r2ghidra 安装（推荐）
-r2pm -l | grep r2ghidra
-
-# 如果未安装 r2ghidra
-r2pm init
-r2pm install r2ghidra
-
-# 测试反编译
-echo 'int main() { return 0; }' | gcc -x c - -o /tmp/test
-r2 -qc 'aa; pdg' /tmp/test
-# 应该显示反编译输出
-```
-
-**API 速率限制**
-- 如果遇到速率限制，在 `agent/llmclient.py` 中添加延迟
-- 考虑使用更高级别的 API 计划进行大规模分析
 
 ## 重要说明
 
@@ -316,8 +187,3 @@ r2 -qc 'aa; pdg' /tmp/test
 ## 免责声明
 
 本工具生成的漏洞报告仅用于教育和研究目的。我们不保证所有发现的准确性或完整性。在采取纠正措施之前，请手动验证任何报告的漏洞。
-
-### 获得最佳结果：
-
-- **首先阅读 `verification_report.md`**：这是最重要的文件。它包含经过过滤和验证的漏洞。从这里开始审查。
-- **预期初始误报**：探索阶段设计为广泛撒网。在验证期间过滤掉 50-80% 的初始候选是正常的。
